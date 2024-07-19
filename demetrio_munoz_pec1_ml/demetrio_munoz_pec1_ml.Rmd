@@ -1,0 +1,351 @@
+---
+title: "PEC1: Clasificación de familias de genes a partir de secuencias de ADN"
+author: "Demetrio Muñoz Alvarez"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: yes
+  pdf_document:
+    toc: true
+params:
+  params:
+  mydata: "human_data.txt"
+  k_values: !r c(1, 3, 5, 7)
+  K: !r c(6)
+bibliography: scholar.bib
+css: align.css
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r working directory, include = FALSE}
+# Establecemos el directorio de trabajo actual.
+setwd("C:/Users/Deme/Desktop/Master/Machine Learning/pec1")
+```
+
+```{r dinamic_asigns, include = FALSE}
+data <- params$mydata
+k_values <- params$k_values
+K <- params$K
+```
+
+```{r load_libraries, include=FALSE}
+library(knitr)
+library(dplyr)
+library(class)
+library(ggplot2)
+library(gmodels)
+library(caret)
+library(ROCR)
+```
+
+# Algoritmo k-NN
+
+La bioinformática, un campo multidisciplinario, se centra en el análisis y la interpretación de datos biológicos mediante el uso de técnicas computacionales y estadísticas. Uno de los algoritmos fundamentales en este dominio es el algoritmo ***k-Nearest Neighbors (kNN)***
+
+El algoritmo kNN es una técnica de aprendizaje automático supervisado utilizada para clasificar e inferir datos basados en la similitud con observaciones previamente categorizadas. Esta similitud se calcula generalmente utilizando la distancia euclidiana, que mide la distancia lineal entre dos puntos en un espacio multidimensional, permitiendo determinar la semejanza entre ellos. La fórmula de la ***distancia euclidiana*** se expresa como: $$dist(p,q)=\sqrt{(p_1 - q_1)^2+(p_2 - q_2)^2+...+(p_n-q_n)^2}$$ En el ámbito de la bioinformática, el algoritmo kNN se aplica en diversas áreas, como la clasificación de secuencias genómicas, la identificación de proteínas, el análisis de datos de expresión génica y la predicción de propiedades biológicas, entre otras aplicaciones.
+
+A pesar de su simplicidad, el algoritmo kNN es ampliamente utilizado en el aprendizaje automático. A continuación, se presentará una tabla que resumirá las ***fortalezas*** y ***debilidades*** del algoritmo [@lantz2019machine]:
+
+```{r table_1, echo = FALSE}
+tabla_1 <- data.frame(
+  Fortalezas = c("Es simple y efectivo", "No hace suposiciones sobre la distribución subyacente de los datos","La fase de entrenamiento es rápida",""),
+  Debilidades = c("No genera un modelo, lo que limita la capacidad de comprender cómo las características están relacionadas con la clase", "Requiere la selección de un valor apropiado para 'k'", "La fase de clasificación puede ser lenta", "Las características nominales y los datos faltantes requieren procesamiento adicional"
+  )
+)
+kable(tabla_1, format = "markdown")
+```
+
+# Introducción
+
+En esta primera práctica, vamos a analizar el conjunto de datos **"`r params$mydata`"**, el cual contiene 2000 secuencias de genes junto con sus respectivas familias, representadas por números. Hay siete familias diferentes: 0 para receptores acoplados a proteínas G, 1 para quinasas de tirosina, 2 para fosfatasas de tirosina, 3 para sintetasas, 4 para sintasas, 5 para canales de iones y 6 para factores de transcripción.
+
+Estas secuencias se dividirán en hexámeros de longitud **K = `r params$K`**. Dado que el alfabeto biológico consta de 4 letras (A, C, G, T), existen un total de 4^`r params$K` = `r 4^ params$K` hexámeros distintos que pueden aparecer al extraer los hexámeros de un gen.
+
+El objetivo final de la práctica es evaluar la capacidad del **algoritmo kNN** para predecir la familia a la que pertenece un gen a partir de su secuencia. Para lograrlo, se creará una función capaz de dividir las secuencias en hexámeros de longitud **K = `r params$K`** y se construirá una matriz que contará los hexámeros en cada secuencia de genes. Este paso se implementará en un script, y con los resultados obtenidos, se aplicarán los algoritmos **kNN** de esta actividad.
+
+# Desarrollar una función propia en R (o python) que implemente el contaje de los hexámeros de un secuencia dada.
+
+La función ***kmers_count_function*** toma una lista de secuencias de nucleótidos y un valor ***K*** como argumentos. Luego, genera una matriz que representa la frecuencia de ocurrencia de todos los hexámeros en las secuencias proporcionadas, excluyendo aquellas que contienen la letra **'N'** en su nomenclatura para simmplificar el análisis en posteriores apartados.
+
+La matriz resultado tiene filas que representan las secuencias de entrada y columnas que representan los hexámeros de las secuencias. Cada celda de la matriz almacena la ocurrencia de un hexámero en una secuencia en particular.
+
+```{r function}
+# Definimos la función "kmers_count_function" que toma dos argumentos:
+  # Primer argumento "sequences": vector de secuencias de ADN o ARN.
+  # Segundo argumento "K": longitud de corte de hexámeros.
+# La función consta de dos partes:
+  # Primera parte: Genera una lista de hexámeros de las secuencias dadas.
+  # Segunda parte: Genera una matriz de ocurrencia de los hexámeros a partir de las secuencias.
+kmers_count_function <- function(sequences, K) {
+# Creamos una lista para almacenar los hexámeros de las secuencias.
+  kmers_list <- list()
+  # Iteramos a través de cada secuencia del argumento "sequences".
+  for (seq in sequences) {
+    # Creamos vector de caracteres vacío para los hexámeros.
+    kmers <- character(0)
+    # Iteramos a través de la secuencia, cortando hexámeros de longitud "K"
+    for (position in 1:(nchar(seq) - K + 1)) {
+      hexamero <- substr(seq, position, position + K - 1)  # Extraemos el hexámero.
+      kmers <- c(kmers, hexamero)  # Agregamos el hexámero al vector.
+    }
+    # Almacenamos la lista hexámeros de la secuencia actual en la lista "kmers_list".
+    kmers_list <- c(kmers_list, list(kmers))
+  }
+  # Creamos un vector con todos los hexámeros únicos y sin "N".
+  unique_hexamers <- unique(unlist(kmers_list))
+  kmers_filter <- unique_hexamers[!grepl("N", unique_hexamers)]
+  # Número de secuencias en "kmers_list". Número de filas.
+  num_sequences <- length(kmers_list)
+  # Número de hexámeros únicos filtrados. Número de columnas.
+  # Este valor debería ser igual a 4^K.
+  num_kmers_filter <- length(kmers_filter)
+  # Creamos la matriz de ceros, con filas igual al número de secuencias y columnas
+  # igual al número de hexámeros únicos.
+  hexamer_matrix <- matrix(0, nrow = num_sequences, ncol = num_kmers_filter,
+                           dimnames = list(NULL, kmers_filter))
+  # Creamos un diccionario para mapear los hexámeros.
+  hexamer_dict <- setNames(1:num_kmers_filter, kmers_filter)
+  # Completamos la matriz de ocurrencia:
+  for (i in 1:num_sequences) {
+    for (hexamero in kmers_list[[i]]) {
+      if (hexamero %in% kmers_filter) {
+        hexamer_index <- hexamer_dict[hexamero]
+        hexamer_matrix[i, hexamer_index] <- hexamer_matrix[i, hexamer_index] + 1
+      }
+    }
+  }
+  return(hexamer_matrix)
+}
+```
+
+# Desarrollar un script en R que implemente un clasificador k-nn. El script realiza los siguientes apartados
+
+El script ***clasificador_knn*** realiza las siguientes acciones:
+
+1.  Carga un conjunto de datos especificado en la variable `r params$mydata`.
+2.  Genera un histograma de las secuencias del conjunto de datos `r params$mydata` que muestra la distribución de las frecuencias de longitudes de las secuencias.
+3.  Implementa la función previamente desarrollada para contar los hexámeros en las secuencias, almacenando los resultados en un objeto llamado **kmers_count**. Se establece **K = `r params$K`** como indica la actividad.
+
+En resumen, el script carga datos, crea un histograma de las longitudes de las secuencias y calcula la matriz de ocurrencia de hexámeros en las secuencias dadas.
+
+```{r script}
+source("C:/Users/Deme/Desktop/Master/Machine Learning/pec1/clasificador_knn.R")
+```
+
+Antes de continuar, comprobamos si la matriz generada con nuestra función es igual a la proporcionada en la actividad, comparando la columna del hexámero **'AAAAAA'** en ambas matrices con algunas líneas de código:
+
+```{r function_output_check}
+# Cargamos la matriz de conteo del fichero hexameros.RData
+load("C:/Users/Deme/Desktop/Master/Machine Learning/pec1/hexameros.RData")
+# Comparamos las columnas "AAAAAA" de ambas matrices:
+col1 <- count[, "AAAAAA"] # Extraemos la columna "AAAAAA" de la matriz.
+col2 <- kmers_count[, "AAAAAA"] # Extraemos la columna "AAAAAA" de la matriz.
+comparacion <- identical(col1, col2) # Comparamos los datos. 
+if (comparacion) {
+  print("Las columnas de ambas matrices son iguales para el hexámero 'AAAAAA'")
+} else {
+  print("Las columnas de ambas matrices iguales para el hexámero 'AAAAAA'")
+}
+```
+
+# Realizar la implementación del algoritmo knn, con los siguientes pasos:
+
+## Utilizando la semilla aleatoria 123, separar los datos en dos partes, una parte para training (75%)y una parte para test (25%)
+
+A partir de la matriz generada por el script y la información de las clases en `r params$mydata`, creamos un conjunto de datos que combina el conteo de hexámeros con la clase asignada a cada gen.
+
+Este conjunto de datos se divide en dos partes: un **conjunto de entrenamiento** (75% de los genes) y otro **conjunto de prueba** (25% de los genes), que se utilizarán para evaluar el algoritmo **kNN** que implementaremos posteriormente. La separación se realiza utilizando una semilla aleatoria para garantizar la reproducibilidad.
+
+En esta actividad, debido a la naturaleza de nuestros datos (mismo tipo de variables), no se ha realizado normalización.
+
+```{r data_preaparation_knn}
+# Extraemos de la columna "class" de "data_script".
+class_labels <- data_script[,2]
+# Combina los datos "kmers_count" con las etiquetas anteriores en el conjunto de datos "matriz_knn".
+matriz_knn <- as.data.frame(cbind(kmers_count, class_labels))
+# Semilla aleatoria para la reproducibilidad.
+set.seed(123)
+# Tamaño de la muestra de entrenamiento (75% de las filas).
+size <- floor(nrow(matriz_knn)*0.75)
+# Extraemos los indices de una muestra aleatoria del 75% de la filas de los datos.
+train_ind <- sample(seq_len(nrow(matriz_knn)), size = size)
+# Extraemos las etiquetas para elegir las filas de los datos de entrenamiento. 
+data_labels <- matriz_knn[,"class_labels"]
+# Vector de etiquetas de clase para el conjunto de entrenamiento.
+train_labels <- matriz_knn[train_ind,"class_labels"]
+# Vector de etiquetas de clase para el conjunto de prueba
+test_labels <- data_labels[-train_ind]
+# Dataframe de entrenamiento utilizando los índices generados.
+data_train <- matriz_knn[train_ind,]
+# Dataframe de prueba utilizando los índices restantes. 
+data_test <- matriz_knn[-train_ind,]
+```
+
+## Aplicar el k-nn (k = 1, 3, 5, 7) basado en el training para predecir la familia de las secuencias del test
+
+Una vez que hemos dividido los datos en conjuntos de entrenamiento y prueba, implementamos el algoritmo **kNN** en R utilizando el paquete *'class'*, que proporciona funciones básicas de clasificación. Mediante la función *'knn()'* y con valores específicos de **'k'** (`r params$k_values`), generamos una lista que contiene las predicciones de cada valor de **'k'**.
+
+```{r knn_algorithm}
+# Semilla aleatoria para la reproducibilidad.
+set.seed(123)
+# Valores de 'k' para el algoritmo kNN.
+# k_values <- c(1, 3, 5, 7)
+# Listas para almacenar los modelos y las matrices resultantes. 
+models <- list()
+confusion_matrices <- list()
+# Preapramos un bucle para cada valor de 'K':
+for (k in k_values) {
+  model_name <- paste("model_knn_k", k, sep = "")
+  # Entrenamiento del modelo con los datos establecidos para cada valor de 'K':
+  model <- knn(train = data_train, test = data_test, cl = train_labels, k = k)
+  # Almacenamos cada modelo resultante de cada valor de 'K':
+  models[[model_name]] <- model
+  
+  # Calculamos la matriz de confusión y almacenamos:
+  cm <- confusionMatrix(data = model, reference = as.factor(test_labels))
+  confusion_matrices[[model_name]] <- cm 
+}
+# Imprimimos las matrices de confusión:
+print(confusion_matrices)
+```
+
+## Comentar los resultados
+
+```{r table_2, echo = FALSE}
+# Extraemos los valores seleccionados de las matrices para mostrarlos en una tabla:
+# Dataframe para almacenar los tabla_2
+tabla_2 <- data.frame(k = k_values)
+accuracy <- numeric(length(k_values))
+kappa <- numeric(length(k_values))
+error_rate <- numeric(length(k_values))
+# Iterar a través de los diferentes valores de k
+for (i in 1:length(k_values)) {
+  k <- k_values[i]
+  confusion_matrix <- confusion_matrices[[paste("model_knn_k", k, sep = "")]]
+  accuracy[i] <- confusion_matrix$overall["Accuracy"]
+  kappa[i] <- confusion_matrix$overall["Kappa"]
+  error_rate[i] <- 1 - accuracy[i]
+}
+tabla_2$Accuracy <- round(accuracy, 2)
+tabla_2$Kappa <- round(kappa, 2)
+tabla_2$Error_rate <- round(error_rate, 2)
+# Valores de 'K' implementados, primera columna de la tabla. 
+col_name <- c(paste(k_values, sep = ""))
+# Ordenamos la tabla por el parámetro "Accuracy" de forma descendente.
+tabla_2 <- tabla_2[order(-tabla_2$Accuracy), ]
+# Imprimimos la tabla:
+kable(tabla_2, format = "markdown")
+```
+
+Como se observa en las matrices de confusión y en la tabla anterior, el modelo ***k = `r tabla_2[1,"k"]`*** destaca con una mayor **precisión** y coeficiente **Kappa** (un valor de Kappa más alto indica un mejor rendimiento del modelo) teniendo un rendimiento superior en comparación con los demás modelos. En este caso, el modelo **k = `r tabla_2[1,"k"]`** tiene la mayor precisión con un valor de `r tabla_2[1,"Accuracy"]`, lo que significa que el `r tabla_2[1,"Accuracy"]*100`% de las observaciones se clasifican correctamente. A medida que aumenta el valor de ***k***, tanto la precisión como el coeficiente Kappa tienden a disminuir.
+
+También es importante observar la **tasa de error** que es el complemento de la precisión y representa la proporción de observaciones clasificadas incorrectamente. Solo el modelo **k = `r tabla_2[1,"k"]`** presenta una tasa de error por debajo del 20% (`r tabla_2[1,"Error_rate"]*100`%), indicando mayor rendimiento en términos de errores de clasificación. A medida que aumenta el valor de ***k***, la tasa de error aumenta, suguiriendo un peor rendimiento en la clasificación.
+
+Además, en el apartado **"Statistics by Class"** de cada matriz de confusión, se pueden encontrar otros parámetros que evalúan la capacidad del modelo para clasificar observaciones, identificando tanto verdaderos positivos como verdaderos negativos, y midiendo la precisión de las predicciones positivas y negativas para cada una de las clases.
+
+En resumen, los resultados muestran que el modelo con **k = `r tabla_2[1,"k"]`** tiene el mejor rendimiento en función de los parametros mostrados en las matrices de confusión.
+
+# Para las secuencias de las familias: 0 (=G protein coupled receptors) y 1( =Tyrosine kinase)
+
+```{r data_preparation_knn_gt}
+#Separar del data frame la clase 0 y 1.
+data_gt <- matriz_knn[matriz_knn$class_labels == 0 | matriz_knn$class_labels == 1,]
+# Preparamos los datos de entranamiento/prueba, como en el apartado anterior.
+set.seed(123)
+size_gt <- floor(nrow(data_gt)*0.75)
+train_ind_gt <- sample(seq_len(nrow(data_gt)), size = size_gt)
+data_labels_gt <- data_gt[,"class_labels"]
+train_labels_gt <- data_gt[train_ind_gt,"class_labels"]
+test_labels_gt <- data_labels_gt[-train_ind_gt]
+data_train_gt <- data_gt[train_ind_gt,]
+data_test_gt <- data_gt[-train_ind_gt,]
+```
+
+```{r knn_algorithm_gt}
+set.seed(123)
+# Creamos las listas para almacenar los resultados:
+models_gt <- list()
+confusion_matrices_gt <- list()
+# Bucle para ajustar el modelo KNN con diferentes valores de k
+for (k in k_values) {
+  model_name_gt <- paste("model_knn_gt_k", k, sep = "")
+  # Entrenamiento del modelo con los datos establecidos para cada valor de 'K':
+  model_gt <- knn(train = data_train_gt, test = data_test_gt, cl = train_labels_gt, k = k)
+  # Almacenamos cada modelo resultante de cada valor de 'K':
+  models_gt[[model_name_gt]] <- model_gt
+   # Calculamos la matriz de confusión y almacenamos:
+  cm_gt <- confusionMatrix(data = model_gt, reference = as.factor(test_labels_gt))
+  confusion_matrices_gt[[model_name_gt]] <- cm_gt
+}
+# Imprimimos las matrices de confusión:
+print(confusion_matrices_gt)
+```
+
+## Representar la curva ROC para cada valor de k = (1, 3, 5, 7)
+
+Una curva **ROC** es una gráfica que muestra cómo un modelo de clasificación realiza la clasificacion de clases. En el eje X, muestra la tasa de falsos positivos (FPR), y en el eje Y, muestra la tasa de verdaderos positivos (TPR). El modelo que tenga una curva ROC más proxima a la esquina superior izquierda tendra una mejor ajuste en la claisificacion.
+
+Para calcular la curva ROC, utilizamos el paquete *'ROC'*. Con las funciones de este paquete, se han calculado los parámetros necesarios para trazar las curvas correspondientes a cada valor de **'k'**. Se ha establecido como clase positiva **"0"(=G)** para receptores acoplados a proteínas.
+
+```{r ROC_curves}
+# Calculamos la tasa de verdaderos positivos (TPR) y la tasa de falsos positivos (FPR) para cada modelo.
+roc_models_gt <- lapply(models_gt, function(model) as.numeric(as.character(model)))
+# Generamos las predicciones para los datos de prueba.
+predictions_gt <- lapply(roc_models_gt, function(model) prediction(model, labels = test_labels_gt))
+# Calculamos el rendimiento de la curva ROC para cada modelo.
+performances_gt <- lapply(predictions_gt, function(model) performance(model, "tpr", "fpr"))
+# Creamos el conjunto de datos para pintar las curvas ROC.
+roc_data <- data.frame(
+  Model = rep(names(performances_gt), each = length(performances_gt$model_knn_gt_k1@x.values[[1]])),
+  TPR = unlist(lapply(performances_gt, function(model) model@y.values[[1]])),
+  FPR = unlist(lapply(performances_gt, function(model) model@x.values[[1]]))
+)
+# Creamos el gráfico ROC con ggplot2
+roc_plot <- ggplot(roc_data, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line() +
+  labs(x = "Ratio Falsos Positivos (FPR)", y = "Ratio Verdaderos Positivos (TPR)" ) +
+  ggtitle("Curvas ROC") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  theme_classic() 
+# Imprimimos el gráfico.
+print(roc_plot)
+```
+
+## Comentar los resultados de la clasificación en función de la curva ROC y del número de falsos positivos, falsos negativos y error de clasificación obtenidos para los diferentes valores de k
+
+```{r table_3, echo = FALSE}
+# Creamos la tabla_3 con los parametros de precisión, tasa de error, FP y FN:
+tabla_3 <- data.frame(k = k_values)
+accuracy_gt <- numeric(length(k_values))
+error_rate_gt <- numeric(length(k_values))
+fp_gt <- numeric(length(k_values))
+fn_gt <- numeric(length(k_values))
+for (i in 1:length(k_values)) {
+  k <- k_values[i]
+  confusion_matrix_gt <- confusion_matrices_gt[[paste("model_knn_gt_k", k, sep = "")]]
+  accuracy_gt[i] <- confusion_matrix_gt$overall["Accuracy"]
+  error_rate_gt[i] <- 1 - accuracy[i]
+  fp_gt[i] <- confusion_matrix_gt$table[1,2]
+  fn_gt[i] <- confusion_matrix_gt$table[2,1]
+}
+tabla_3$Accuracy <- round(accuracy_gt,2)
+tabla_3$Error_rate <- round(error_rate_gt,2)
+tabla_3$FP <- fp_gt
+tabla_3$FN <- fn_gt
+col_name <- c(paste(k_values, sep = ""))
+tabla_3 <- tabla_3[order(-tabla_3$Accuracy), ]
+kable(tabla_3, format = "markdown")
+```
+
+Con el gráfico y la tabla de parámetros para los nuevos modelos kNN, podemos observar que el modelo con k = `r tabla_3[1,"k"]` sigue siendo el que mejor se ajusta. En el gráfico ROC, vemos que este modelo se acerca más a la esquina superior izquierda, tiene una precisión del `r tabla_3[1,"Accuracy"]*100`% y un menor número de falsos positivos y falsos negativos (`r tabla_3[1,"FP"]`/`r tabla_3[1,"FN"]`) en comparación con otros valores de **'k'**.
+
+En el caso de estos modelos más simples, destacamos que el valor de k = `r tabla_3[3,"k"]` presenta una mejor clasificación en comparación con el modelo de múltiples clases realizado en el apartado anterior para el mismo valor de **'k'**. En la gráfica ROC, podemos observar que la curva de este modelo se ajusta mejor que la del valor k = `r tabla_3[4,"k"]`. A pesar de esto, sigue presentando una tasa de error mínimamente mayor.
+
+En conclusión, el valor de k = `r tabla_3[1,"k"]` sigue mostrando el mejor rendimiento para predecir la familia de las secuencias de los hexámeros evaluados, ya sea en un algoritmo multiclase o en uno de clases binarias. Este valor de **'k'** obtiene lla mayor precisión, la menor tasa de error y el menor número de observaciones clasificadas como falsos positivos y falsos negativos de todas las clasificaciones realizadas. 
+
+# Referencias
